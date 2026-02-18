@@ -1,80 +1,185 @@
 // ============================================================
-//  data.js — LocalStorage-backed data layer
+//  data.js — Supabase-backed data layer
+// ============================================================
+//
+//  SUPABASE SETUP — run these in the SQL Editor before first use:
+//
+//  -- 1. categories table
+//  create table categories (
+//    id   bigserial primary key,
+//    name text unique not null
+//  );
+//
+//  -- 2. posts table
+//  create table posts (
+//    id          bigserial primary key,
+//    title       text not null,
+//    content     text    default '',
+//    excerpt     text    default '',
+//    category    text    default '随笔',
+//    tags        text[]  default '{}',
+//    cover_image text    default '',
+//    images      text[]  default '{}',
+//    video_url   text    default '',
+//    featured    boolean default false,
+//    date        timestamptz default now(),
+//    views       integer default 0
+//  );
+//
+//  -- 3. increment_views RPC
+//  create or replace function increment_views(post_id bigint)
+//  returns void as $$
+//    update posts set views = views + 1 where id = post_id;
+//  $$ language sql;
+//
+//  -- 4. RLS policies (allow anonymous read/write for personal blog)
+//  alter table categories enable row level security;
+//  create policy "anon_all" on categories for all using (true) with check (true);
+//  alter table posts enable row level security;
+//  create policy "anon_all" on posts for all using (true) with check (true);
+//
+//  -- 5. Storage: create a public bucket named "images"
+//  --    Then add this Storage policy:
+//  insert into storage.policies (name, bucket_id, operation, definition)
+//  values ('anon_upload', 'images', 'INSERT', 'true');
+//
 // ============================================================
 
+const SUPABASE_URL      = 'https://cgqcthmroxoyxcvmidps.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNncWN0aG1yb3hveXhjdm1pZHBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0Mjk3NzksImV4cCI6MjA4NzAwNTc3OX0.s_Vc8VPpu6M8I07afw3vMsg7prlZngtzDi3wUc4aUfE';
+
+const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 const DB = {
-  POSTS_KEY: 'vlog_posts',
-  CATS_KEY:  'vlog_categories',
+
+  // ---------- helpers ----------
+
+  _rowToPost(row) {
+    return {
+      id:         String(row.id),
+      title:      row.title       || '',
+      content:    row.content     || '',
+      excerpt:    row.excerpt     || '',
+      category:   row.category    || '随笔',
+      tags:       row.tags        || [],
+      coverImage: row.cover_image || '',
+      images:     row.images      || [],
+      videoUrl:   row.video_url   || '',
+      featured:   row.featured    || false,
+      date:       row.date        || new Date().toISOString(),
+      views:      row.views       || 0,
+    };
+  },
+
+  _makeExcerpt(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html || '';
+    const text = tmp.textContent || tmp.innerText || '';
+    return text.slice(0, 120).trim() + (text.length > 120 ? '…' : '');
+  },
 
   // ---------- categories ----------
-  getCategories() {
-    const raw = localStorage.getItem(this.CATS_KEY);
-    return raw ? JSON.parse(raw) : ['随笔', '摄影', '旅行', '技术', '生活'];
+
+  async getCategories() {
+    const { data, error } = await _supabase
+      .from('categories')
+      .select('name')
+      .order('id', { ascending: true });
+    if (error) { console.error('getCategories', error); return ['随笔', '摄影', '旅行', '技术', '生活']; }
+    return data.map(r => r.name);
   },
-  saveCategories(cats) {
-    localStorage.setItem(this.CATS_KEY, JSON.stringify(cats));
+
+  async addCategory(name) {
+    const cats = await this.getCategories();
+    if (cats.includes(name)) return;
+    const { error } = await _supabase.from('categories').insert({ name });
+    if (error) console.error('addCategory', error);
   },
-  addCategory(name) {
-    const cats = this.getCategories();
-    if (!cats.includes(name)) { cats.push(name); this.saveCategories(cats); }
-  },
-  deleteCategory(name) {
-    const cats = this.getCategories().filter(c => c !== name);
-    this.saveCategories(cats);
+
+  async deleteCategory(name) {
+    const { error } = await _supabase.from('categories').delete().eq('name', name);
+    if (error) console.error('deleteCategory', error);
   },
 
   // ---------- posts ----------
-  getPosts() {
-    const raw = localStorage.getItem(this.POSTS_KEY);
-    return raw ? JSON.parse(raw) : [];
+
+  async getPosts() {
+    const { data, error } = await _supabase
+      .from('posts')
+      .select('*')
+      .order('date', { ascending: false });
+    if (error) { console.error('getPosts', error); return []; }
+    return data.map(r => this._rowToPost(r));
   },
-  savePosts(posts) {
-    localStorage.setItem(this.POSTS_KEY, JSON.stringify(posts));
+
+  async getPost(id) {
+    const { data, error } = await _supabase
+      .from('posts')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) { console.error('getPost', error); return null; }
+    return this._rowToPost(data);
   },
-  getPost(id) {
-    return this.getPosts().find(p => p.id === id) || null;
-  },
-  createPost(data) {
-    const posts = this.getPosts();
-    const post = {
-      id:         Date.now().toString(),
-      title:      data.title      || '无题',
-      content:    data.content    || '',
-      excerpt:    data.excerpt    || this._makeExcerpt(data.content),
-      category:   data.category   || '随笔',
-      tags:       data.tags       || [],
-      coverImage: data.coverImage || '',
-      images:     data.images     || [],
-      videoUrl:   data.videoUrl   || '',
-      featured:   data.featured   || false,
-      date:       new Date().toISOString(),
-      views:      0,
+
+  async createPost(data) {
+    const row = {
+      title:       data.title      || '无题',
+      content:     data.content    || '',
+      excerpt:     data.excerpt    || this._makeExcerpt(data.content),
+      category:    data.category   || '随笔',
+      tags:        data.tags       || [],
+      cover_image: data.coverImage || '',
+      images:      data.images     || [],
+      video_url:   data.videoUrl   || '',
+      featured:    data.featured   || false,
+      date:        data.date       || new Date().toISOString(),
+      views:       0,
     };
-    posts.unshift(post);
-    this.savePosts(posts);
-    return post;
+    const { data: created, error } = await _supabase
+      .from('posts')
+      .insert(row)
+      .select()
+      .single();
+    if (error) { console.error('createPost', error); return null; }
+    return this._rowToPost(created);
   },
-  updatePost(id, data) {
-    const posts = this.getPosts();
-    const idx = posts.findIndex(p => p.id === id);
-    if (idx === -1) return null;
-    posts[idx] = { ...posts[idx], ...data };
-    this.savePosts(posts);
-    return posts[idx];
+
+  async updatePost(id, data) {
+    const row = {};
+    if (data.title       !== undefined) row.title       = data.title;
+    if (data.content     !== undefined) row.content     = data.content;
+    if (data.excerpt     !== undefined) row.excerpt     = data.excerpt;
+    if (data.category    !== undefined) row.category    = data.category;
+    if (data.tags        !== undefined) row.tags        = data.tags;
+    if (data.coverImage  !== undefined) row.cover_image = data.coverImage;
+    if (data.images      !== undefined) row.images      = data.images;
+    if (data.videoUrl    !== undefined) row.video_url   = data.videoUrl;
+    if (data.featured    !== undefined) row.featured    = data.featured;
+    const { data: updated, error } = await _supabase
+      .from('posts')
+      .update(row)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) { console.error('updatePost', error); return null; }
+    return this._rowToPost(updated);
   },
-  deletePost(id) {
-    const posts = this.getPosts().filter(p => p.id !== id);
-    this.savePosts(posts);
+
+  async deletePost(id) {
+    const { error } = await _supabase.from('posts').delete().eq('id', id);
+    if (error) console.error('deletePost', error);
   },
-  incrementViews(id) {
-    const posts = this.getPosts();
-    const p = posts.find(p => p.id === id);
-    if (p) { p.views = (p.views || 0) + 1; this.savePosts(posts); }
+
+  async incrementViews(id) {
+    const { error } = await _supabase.rpc('increment_views', { post_id: Number(id) });
+    if (error) console.error('incrementViews', error);
   },
 
   // ---------- search / filter ----------
-  searchPosts(query, category) {
-    let posts = this.getPosts();
+
+  async searchPosts(query, category) {
+    let posts = await this.getPosts();
     if (category && category !== 'all') {
       posts = posts.filter(p => p.category === category);
     }
@@ -89,16 +194,36 @@ const DB = {
     return posts;
   },
 
-  _makeExcerpt(html) {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html || '';
-    const text = tmp.textContent || tmp.innerText || '';
-    return text.slice(0, 120).trim() + (text.length > 120 ? '…' : '');
+  // ---------- image upload ----------
+
+  async uploadImage(file) {
+    const ext = file.name.split('.').pop();
+    const path = `${Date.now()}.${ext}`;
+    const { error } = await _supabase.storage.from('images').upload(path, file);
+    if (error) { console.error('uploadImage', error); return null; }
+    const { data } = _supabase.storage.from('images').getPublicUrl(path);
+    return data.publicUrl;
   },
 
   // ---------- seed demo data ----------
-  seed() {
-    if (this.getPosts().length > 0) return;
+
+  async seed() {
+    const { count, error } = await _supabase
+      .from('posts')
+      .select('*', { count: 'exact', head: true });
+    if (error) { console.error('seed check', error); return; }
+    if (count > 0) return;
+
+    // Seed categories if table is empty
+    const { count: catCount } = await _supabase
+      .from('categories')
+      .select('*', { count: 'exact', head: true });
+    if (!catCount) {
+      await _supabase.from('categories').insert([
+        { name: '随笔' }, { name: '摄影' }, { name: '旅行' }, { name: '技术' }, { name: '生活' },
+      ]);
+    }
+
     const demos = [
       {
         title: '在京都的三天两夜',
@@ -106,9 +231,7 @@ const DB = {
         category: '旅行',
         tags: ['京都', '日本', '秋天'],
         coverImage: 'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800&q=80',
-        images: [],
-        videoUrl: '',
-        featured: true,
+        images: [], videoUrl: '', featured: true,
       },
       {
         title: '用光影记录一座城市',
@@ -116,9 +239,7 @@ const DB = {
         category: '摄影',
         tags: ['街拍', '城市', '光影'],
         coverImage: 'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=800&q=80',
-        images: [],
-        videoUrl: '',
-        featured: false,
+        images: [], videoUrl: '', featured: false,
       },
       {
         title: '关于独处这件事',
@@ -126,9 +247,7 @@ const DB = {
         category: '随笔',
         tags: ['生活', '独处', '思考'],
         coverImage: 'https://images.unsplash.com/photo-1474377207190-a7d8b3334068?w=800&q=80',
-        images: [],
-        videoUrl: '',
-        featured: false,
+        images: [], videoUrl: '', featured: false,
       },
       {
         title: '深夜的上海外滩',
@@ -136,9 +255,7 @@ const DB = {
         category: '旅行',
         tags: ['上海', '夜景', '记忆'],
         coverImage: 'https://images.unsplash.com/photo-1538428494232-9c0d8a3ab403?w=800&q=80',
-        images: [],
-        videoUrl: '',
-        featured: true,
+        images: [], videoUrl: '', featured: true,
       },
       {
         title: '咖啡馆里的代码时光',
@@ -146,23 +263,16 @@ const DB = {
         category: '技术',
         tags: ['编程', '效率', '咖啡'],
         coverImage: 'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=800&q=80',
-        images: [],
-        videoUrl: '',
-        featured: false,
+        images: [], videoUrl: '', featured: false,
       },
     ];
-    // Insert newest first
-    demos.reverse().forEach((d, i) => {
-      const post = this.createPost(d);
-      // Back-date them a bit for variety
-      const posts = this.getPosts();
-      const p = posts.find(x => x.id === post.id);
-      if (p) {
-        const d = new Date();
-        d.setDate(d.getDate() - i * 5);
-        p.date = d.toISOString();
-      }
-      this.savePosts(posts);
-    });
+
+    // Insert newest-first: reverse so index 0 gets today, index 4 gets today-20d
+    const reversed = [...demos].reverse();
+    for (let i = 0; i < reversed.length; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i * 5);
+      await this.createPost({ ...reversed[i], date: d.toISOString() });
+    }
   },
 };

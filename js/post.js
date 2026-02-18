@@ -42,7 +42,6 @@ function getVideoEmbed(url) {
   if (yt) return `<iframe src="https://www.youtube.com/embed/${yt}" allowfullscreen></iframe>`;
   const bl = getBilibiliId(url);
   if (bl) return `<iframe src="https://player.bilibili.com/player.html?bvid=${bl}&high_quality=1" allowfullscreen></iframe>`;
-  // Generic iframe for other video URLs
   if (url.match(/\.(mp4|webm|ogg)$/i)) {
     return `<video controls style="width:100%;border-radius:var(--radius)"><source src="${url}" /></video>`;
   }
@@ -50,27 +49,30 @@ function getVideoEmbed(url) {
 }
 
 /* ---------- Load post ---------- */
-const params = new URLSearchParams(location.search);
-const postId = params.get('id');
+const params    = new URLSearchParams(location.search);
+const postId    = params.get('id');
 const container = document.getElementById('postPage');
 
-if (!postId) {
-  container.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:80px 0">未找到文章</p>';
-} else {
-  const post = DB.getPost(postId);
+(async () => {
+  if (!postId) {
+    container.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:80px 0">未找到文章</p>';
+    return;
+  }
+  const post = await DB.getPost(postId);
   if (!post) {
     container.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:80px 0">文章不存在或已删除</p>';
-  } else {
-    DB.incrementViews(postId);
-    document.title = `${post.title} · My Blog`;
-    renderPost(post);
+    return;
   }
-}
+  await DB.incrementViews(postId);
+  document.title = `${post.title} · My Blog`;
+  await renderPost(post);
+})();
 
-function renderPost(p) {
+async function renderPost(p) {
   // Render nav categories
   const nav = document.getElementById('catNav');
-  DB.getCategories().forEach(c => {
+  const cats = await DB.getCategories();
+  cats.forEach(c => {
     const a = document.createElement('a');
     a.href = `index.html`;
     a.className = 'nav-link';
@@ -144,7 +146,7 @@ function renderPost(p) {
   `;
 
   // Render related
-  const related = DB.searchPosts('', p.category).filter(x => x.id !== p.id).slice(0, 3);
+  const related = (await DB.searchPosts('', p.category)).filter(x => x.id !== p.id).slice(0, 3);
   if (related.length) {
     document.getElementById('relatedSection').innerHTML = `
       <p class="section-label" style="font-size:.78rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);margin-bottom:20px;">相关文章</p>

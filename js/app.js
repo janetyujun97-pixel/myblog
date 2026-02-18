@@ -25,9 +25,7 @@ document.getElementById('themeToggle')?.addEventListener('click', () => {
   updateThemeIcons(next);
 });
 
-/* ---------- Seed & State ---------- */
-DB.seed();
-
+/* ---------- State ---------- */
 let currentCat = 'all';
 let searchQuery = '';
 
@@ -50,9 +48,9 @@ function mediaType(post) {
 }
 
 /* ---------- Render nav ---------- */
-function renderNav() {
+async function renderNav() {
   const nav = document.getElementById('catNav');
-  const cats = DB.getCategories();
+  const cats = await DB.getCategories();
   nav.innerHTML = `<a href="#" class="nav-link ${currentCat === 'all' ? 'active' : ''}" data-cat="all">全部</a>`;
   cats.forEach(c => {
     nav.innerHTML += `<a href="#" class="nav-link ${currentCat === c ? 'active' : ''}" data-cat="${c}">${c}</a>`;
@@ -63,9 +61,9 @@ function renderNav() {
 }
 
 /* ---------- Render filter pills ---------- */
-function renderFilterPills() {
+async function renderFilterPills() {
   const bar = document.getElementById('filterBar');
-  const cats = DB.getCategories();
+  const cats = await DB.getCategories();
   bar.innerHTML = `<span class="section-label">分类</span>
     <button class="filter-pill ${currentCat === 'all' ? 'active' : ''}" data-cat="all">全部</button>`;
   cats.forEach(c => {
@@ -76,18 +74,18 @@ function renderFilterPills() {
   });
 }
 
-function setCategory(cat) {
+async function setCategory(cat) {
   currentCat = cat;
-  renderNav();
-  renderFilterPills();
-  renderPosts();
+  await renderNav();
+  await renderFilterPills();
+  await renderPosts();
 }
 
 /* ---------- Render featured ---------- */
-function renderFeatured() {
+async function renderFeatured() {
   const section = document.getElementById('featuredSection');
   const container = document.getElementById('featuredCard');
-  const posts = DB.getPosts().filter(p => p.featured);
+  const posts = (await DB.getPosts()).filter(p => p.featured);
   if (!posts.length) { section.style.display = 'none'; return; }
   section.style.display = '';
   const p = posts[0];
@@ -122,9 +120,9 @@ function renderFeatured() {
 }
 
 /* ---------- Render posts ---------- */
-function renderPosts() {
+async function renderPosts() {
   const grid = document.getElementById('postsGrid');
-  const posts = DB.searchPosts(searchQuery, currentCat);
+  const posts = await DB.searchPosts(searchQuery, currentCat);
 
   if (!posts.length) {
     grid.innerHTML = `<div class="empty-state">
@@ -164,10 +162,10 @@ function openPost(id) {
 }
 
 /* ---------- Search overlay ---------- */
-const headerInput   = document.getElementById('headerSearchInput');
-const overlay       = document.getElementById('searchOverlay');
-const overlayInput  = document.getElementById('overlaySearchInput');
-const resultsList   = document.getElementById('searchResultsList');
+const headerInput    = document.getElementById('headerSearchInput');
+const overlay        = document.getElementById('searchOverlay');
+const overlayInput   = document.getElementById('overlaySearchInput');
+const resultsList    = document.getElementById('searchResultsList');
 const closeSearchBtn = document.getElementById('closeSearch');
 
 function openSearchOverlay() {
@@ -190,13 +188,13 @@ closeSearchBtn.addEventListener('click', closeSearchOverlay);
 overlay.addEventListener('click', e => { if (e.target === overlay) closeSearchOverlay(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSearchOverlay(); });
 
-function doSearch(q) {
+async function doSearch(q) {
   const trimmed = q.trim();
   if (!trimmed) {
     resultsList.innerHTML = '<p class="search-no-result">开始输入以搜索文章</p>';
     return;
   }
-  const results = DB.searchPosts(trimmed, null);
+  const results = await DB.searchPosts(trimmed, null);
   if (!results.length) {
     resultsList.innerHTML = `<p class="search-no-result">没有找到"${trimmed}"相关文章</p>`;
     return;
@@ -212,14 +210,19 @@ function doSearch(q) {
 }
 
 /* ---------- Lightbox ---------- */
-const lightbox     = document.getElementById('lightbox');
-const lightboxImg  = document.getElementById('lightboxImg');
+const lightbox      = document.getElementById('lightbox');
+const lightboxImg   = document.getElementById('lightboxImg');
 const lightboxClose = document.getElementById('lightboxClose');
 lightboxClose.addEventListener('click', () => lightbox.classList.remove('open'));
 lightbox.addEventListener('click', e => { if (e.target === lightbox) lightbox.classList.remove('open'); });
 
 /* ---------- Init ---------- */
-renderNav();
-renderFilterPills();
-renderFeatured();
-renderPosts();
+async function init() {
+  await DB.seed();
+  await renderNav();
+  await renderFilterPills();
+  await renderFeatured();
+  await renderPosts();
+}
+
+init();

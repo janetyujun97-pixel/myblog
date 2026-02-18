@@ -32,26 +32,28 @@ function showToast(msg, type = '') {
 }
 
 /* ---------- State ---------- */
-let editingId  = null;
-let uploadedImages = []; // base64 array
+let editingId      = null;
+let uploadedImages = []; // array of URLs
 
 /* ---------- Init ---------- */
-DB.seed();
-renderCategorySelect();
-renderCatList();
-renderAdminPostList();
+(async () => {
+  await DB.seed();
+  await renderCategorySelect();
+  await renderCatList();
+  await renderAdminPostList();
+})();
 
 /* ---------- Category select ---------- */
-function renderCategorySelect() {
-  const sel = document.getElementById('inputCategory');
-  const cats = DB.getCategories();
+async function renderCategorySelect() {
+  const sel  = document.getElementById('inputCategory');
+  const cats = await DB.getCategories();
   sel.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
 }
 
 /* ---------- Category list ---------- */
-function renderCatList() {
+async function renderCatList() {
   const list = document.getElementById('catList');
-  const cats = DB.getCategories();
+  const cats = await DB.getCategories();
   list.innerHTML = cats.map(c => `
     <div class="cat-item">
       <span>${c}</span>
@@ -59,22 +61,22 @@ function renderCatList() {
     </div>`).join('');
 }
 
-function deleteCategory(name) {
+async function deleteCategory(name) {
   if (!confirm(`确定删除分类"${name}"吗？`)) return;
-  DB.deleteCategory(name);
-  renderCatList();
-  renderCategorySelect();
+  await DB.deleteCategory(name);
+  await renderCatList();
+  await renderCategorySelect();
   showToast(`已删除分类"${name}"`, 'success');
 }
 
-document.getElementById('btnAddCat').addEventListener('click', () => {
+document.getElementById('btnAddCat').addEventListener('click', async () => {
   const input = document.getElementById('newCatInput');
-  const name = input.value.trim();
+  const name  = input.value.trim();
   if (!name) return;
-  DB.addCategory(name);
+  await DB.addCategory(name);
   input.value = '';
-  renderCatList();
-  renderCategorySelect();
+  await renderCatList();
+  await renderCategorySelect();
   showToast(`已添加分类"${name}"`, 'success');
 });
 document.getElementById('newCatInput').addEventListener('keydown', e => {
@@ -82,9 +84,9 @@ document.getElementById('newCatInput').addEventListener('keydown', e => {
 });
 
 /* ---------- Admin post list ---------- */
-function renderAdminPostList() {
-  const list = document.getElementById('adminPostList');
-  const posts = DB.getPosts();
+async function renderAdminPostList() {
+  const list  = document.getElementById('adminPostList');
+  const posts = await DB.getPosts();
   if (!posts.length) {
     list.innerHTML = '<p style="font-size:.82rem;color:var(--text-3);text-align:center;padding:16px 0">还没有文章</p>';
     return;
@@ -106,36 +108,36 @@ function renderAdminPostList() {
     </div>`).join('');
 }
 
-function deletePost(id) {
+async function deletePost(id) {
   if (!confirm('确定要删除这篇文章吗？')) return;
-  DB.deletePost(id);
-  if (editingId === id) { editingId = null; clearForm(); }
-  renderAdminPostList();
+  await DB.deletePost(id);
+  if (editingId === id) { editingId = null; await clearForm(); }
+  await renderAdminPostList();
   showToast('文章已删除', 'success');
 }
 
-document.getElementById('btnNewPost').addEventListener('click', () => {
+document.getElementById('btnNewPost').addEventListener('click', async () => {
   editingId = null;
-  clearForm();
-  document.getElementById('formTitle').textContent = '写新文章';
+  await clearForm();
+  document.getElementById('formTitle').textContent     = '写新文章';
   document.getElementById('btnSubmitLabel').textContent = '发布文章';
-  renderAdminPostList();
+  await renderAdminPostList();
 });
 
 /* ---------- Load post for editing ---------- */
-function loadPostForEdit(id) {
-  const p = DB.getPost(id);
+async function loadPostForEdit(id) {
+  const p = await DB.getPost(id);
   if (!p) return;
   editingId = id;
 
-  document.getElementById('formTitle').textContent  = '编辑文章';
-  document.getElementById('btnSubmitLabel').textContent = '保存更改';
-  document.getElementById('inputTitle').value       = p.title;
-  document.getElementById('inputCoverUrl').value    = p.coverImage || '';
-  document.getElementById('editorArea').innerHTML   = p.content;
-  document.getElementById('inputVideoUrl').value    = p.videoUrl || '';
-  document.getElementById('inputTags').value        = (p.tags || []).join(', ');
-  document.getElementById('inputExcerpt').value     = p.excerpt || '';
+  document.getElementById('formTitle').textContent      = '编辑文章';
+  document.getElementById('btnSubmitLabel').textContent  = '保存更改';
+  document.getElementById('inputTitle').value            = p.title;
+  document.getElementById('inputCoverUrl').value         = p.coverImage || '';
+  document.getElementById('editorArea').innerHTML        = p.content;
+  document.getElementById('inputVideoUrl').value         = p.videoUrl || '';
+  document.getElementById('inputTags').value             = (p.tags || []).join(', ');
+  document.getElementById('inputExcerpt').value          = p.excerpt || '';
   const sel = document.getElementById('inputCategory');
   sel.value = p.category;
 
@@ -147,7 +149,7 @@ function loadPostForEdit(id) {
   uploadedImages = p.images ? [...p.images] : [];
   renderPreviews();
 
-  renderAdminPostList();
+  await renderAdminPostList();
   document.getElementById('formCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -181,9 +183,9 @@ editorArea.addEventListener('focus', () => {
 });
 
 /* ---------- Image upload ---------- */
-const uploadArea   = document.getElementById('uploadArea');
-const fileInput    = document.getElementById('fileInput');
-const previewGrid  = document.getElementById('previewGrid');
+const uploadArea  = document.getElementById('uploadArea');
+const fileInput   = document.getElementById('fileInput');
+const previewGrid = document.getElementById('previewGrid');
 
 uploadArea.addEventListener('click', () => fileInput.click());
 uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
@@ -195,17 +197,20 @@ uploadArea.addEventListener('drop', e => {
 });
 fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 
-function handleFiles(files) {
-  Array.from(files).forEach(file => {
-    if (!file.type.startsWith('image/')) return;
-    if (file.size > 5 * 1024 * 1024) { showToast(`图片 ${file.name} 超过 5MB`, 'error'); return; }
-    const reader = new FileReader();
-    reader.onload = e => {
-      uploadedImages.push(e.target.result);
+async function handleFiles(files) {
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith('image/')) continue;
+    if (file.size > 5 * 1024 * 1024) { showToast(`图片 ${file.name} 超过 5MB`, 'error'); continue; }
+    showToast('上传中…');
+    const url = await DB.uploadImage(file);
+    if (url) {
+      uploadedImages.push(url);
       renderPreviews();
-    };
-    reader.readAsDataURL(file);
-  });
+      showToast('上传完成', 'success');
+    } else {
+      showToast(`图片 ${file.name} 上传失败`, 'error');
+    }
+  }
   fileInput.value = '';
 }
 
@@ -223,52 +228,51 @@ function removeImage(idx) {
 }
 
 /* ---------- Submit ---------- */
-document.getElementById('btnSubmit').addEventListener('click', () => {
-  const title   = document.getElementById('inputTitle').value.trim();
-  const content = document.getElementById('editorArea').innerHTML.trim();
+document.getElementById('btnSubmit').addEventListener('click', async () => {
+  const title    = document.getElementById('inputTitle').value.trim();
+  const content  = document.getElementById('editorArea').innerHTML.trim();
   const category = document.getElementById('inputCategory').value;
-  const cover   = document.getElementById('inputCoverUrl').value.trim();
-  const video   = document.getElementById('inputVideoUrl').value.trim();
-  const tagsRaw = document.getElementById('inputTags').value;
-  const excerpt = document.getElementById('inputExcerpt').value.trim();
+  const cover    = document.getElementById('inputCoverUrl').value.trim();
+  const video    = document.getElementById('inputVideoUrl').value.trim();
+  const tagsRaw  = document.getElementById('inputTags').value;
+  const excerpt  = document.getElementById('inputExcerpt').value.trim();
   const featured = document.getElementById('featuredToggle').classList.contains('on');
 
   if (!title) { showToast('请填写标题', 'error'); document.getElementById('inputTitle').focus(); return; }
   if (!content || content === '<br>') { showToast('请填写正文内容', 'error'); document.getElementById('editorArea').focus(); return; }
 
   const tags = tagsRaw.split(/[,，]+/).map(t => t.trim()).filter(Boolean);
-
   const data = { title, content, category, coverImage: cover, images: [...uploadedImages], videoUrl: video, tags, excerpt, featured };
 
   if (editingId) {
-    DB.updatePost(editingId, data);
+    await DB.updatePost(editingId, data);
     showToast('文章已更新', 'success');
   } else {
-    DB.createPost(data);
+    await DB.createPost(data);
     showToast('文章已发布', 'success');
   }
 
   editingId = null;
-  clearForm();
-  renderAdminPostList();
-  document.getElementById('formTitle').textContent  = '写新文章';
-  document.getElementById('btnSubmitLabel').textContent = '发布文章';
+  await clearForm();
+  await renderAdminPostList();
+  document.getElementById('formTitle').textContent      = '写新文章';
+  document.getElementById('btnSubmitLabel').textContent  = '发布文章';
 });
 
 /* ---------- Clear form ---------- */
-document.getElementById('btnClear').addEventListener('click', () => {
-  if (confirm('确定要清空当前内容吗？')) clearForm();
+document.getElementById('btnClear').addEventListener('click', async () => {
+  if (confirm('确定要清空当前内容吗？')) await clearForm();
 });
 
-function clearForm() {
-  document.getElementById('inputTitle').value    = '';
-  document.getElementById('inputCoverUrl').value = '';
+async function clearForm() {
+  document.getElementById('inputTitle').value     = '';
+  document.getElementById('inputCoverUrl').value  = '';
   document.getElementById('editorArea').innerHTML = '';
-  document.getElementById('inputVideoUrl').value = '';
-  document.getElementById('inputTags').value     = '';
-  document.getElementById('inputExcerpt').value  = '';
+  document.getElementById('inputVideoUrl').value  = '';
+  document.getElementById('inputTags').value      = '';
+  document.getElementById('inputExcerpt').value   = '';
   document.getElementById('featuredToggle').classList.remove('on');
   uploadedImages = [];
   renderPreviews();
-  renderCategorySelect();
+  await renderCategorySelect();
 }
