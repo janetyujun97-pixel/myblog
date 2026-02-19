@@ -563,6 +563,14 @@ mark {
   padding: 4px 12px;
 }
 
+/* Post page top bar (back + edit) */
+.post-page-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+
 /* Back link */
 .back-link {
   display: inline-flex;
@@ -570,7 +578,6 @@ mark {
   gap: 8px;
   color: var(--text-3);
   font-size: .88rem;
-  margin-bottom: 32px;
   transition: color var(--transition);
 }
 .back-link:hover { color: var(--accent); }

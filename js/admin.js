@@ -41,6 +41,8 @@ let uploadedImages = []; // array of URLs
   await renderCategorySelect();
   await renderCatList();
   await renderAdminPostList();
+  const editId = new URLSearchParams(location.search).get('edit');
+  if (editId) await loadPostForEdit(editId);
 })();
 
 /* ---------- Category select ---------- */
