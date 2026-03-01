@@ -205,6 +205,15 @@ const DB = {
     return data.publicUrl;
   },
 
+  async uploadVideo(file) {
+    const ext = file.name.split('.').pop();
+    const path = `video_${Date.now()}.${ext}`;
+    const { error } = await _supabase.storage.from('images').upload(path, file);
+    if (error) { console.error('uploadVideo', error); return null; }
+    const { data } = _supabase.storage.from('images').getPublicUrl(path);
+    return data.publicUrl;
+  },
+
   // ---------- seed demo data ----------
 
   async seed() {
