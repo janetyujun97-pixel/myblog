@@ -52,6 +52,39 @@ const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const DB = {
 
+  // ---------- auth ----------
+
+  async getSession() {
+    return _supabase.auth.getSession();
+  },
+
+  async getCurrentUser() {
+    const { data, error } = await _supabase.auth.getUser();
+    if (error) { console.error('getCurrentUser', error); return null; }
+    return data.user || null;
+  },
+
+  async signIn(email, password) {
+    const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data;
+  },
+
+  async signOut() {
+    const { error } = await _supabase.auth.signOut();
+    if (error) throw error;
+  },
+
+  onAuthStateChange(callback) {
+    return _supabase.auth.onAuthStateChange(callback);
+  },
+
+  async requireAuth() {
+    const user = await this.getCurrentUser();
+    if (!user) throw new Error('UNAUTHORIZED');
+    return user;
+  },
+
   // ---------- helpers ----------
 
   _rowToPost(row) {
@@ -90,6 +123,7 @@ const DB = {
   },
 
   async addCategory(name) {
+    await this.requireAuth();
     const cats = await this.getCategories();
     if (cats.includes(name)) return;
     const { error } = await _supabase.from('categories').insert({ name });
@@ -97,6 +131,7 @@ const DB = {
   },
 
   async deleteCategory(name) {
+    await this.requireAuth();
     const { error } = await _supabase.from('categories').delete().eq('name', name);
     if (error) console.error('deleteCategory', error);
   },
@@ -123,6 +158,7 @@ const DB = {
   },
 
   async createPost(data) {
+    await this.requireAuth();
     const row = {
       title:       data.title      || '无题',
       content:     data.content    || '',
@@ -146,6 +182,7 @@ const DB = {
   },
 
   async updatePost(id, data) {
+    await this.requireAuth();
     const row = {};
     if (data.title       !== undefined) row.title       = data.title;
     if (data.content     !== undefined) row.content     = data.content;
@@ -167,6 +204,7 @@ const DB = {
   },
 
   async deletePost(id) {
+    await this.requireAuth();
     const { error } = await _supabase.from('posts').delete().eq('id', id);
     if (error) console.error('deletePost', error);
   },
@@ -197,6 +235,7 @@ const DB = {
   // ---------- image upload ----------
 
   async uploadImage(file) {
+    await this.requireAuth();
     const ext = file.name.split('.').pop();
     const path = `${Date.now()}.${ext}`;
     const { error } = await _supabase.storage.from('images').upload(path, file);
@@ -206,6 +245,7 @@ const DB = {
   },
 
   async uploadVideo(file) {
+    await this.requireAuth();
     const ext = file.name.split('.').pop();
     const path = `video_${Date.now()}.${ext}`;
     const { error } = await _supabase.storage.from('images').upload(path, file);
@@ -222,6 +262,9 @@ const DB = {
       .select('*', { count: 'exact', head: true });
     if (error) { console.error('seed check', error); return; }
     if (count > 0) return;
+
+    const user = await this.getCurrentUser();
+    if (!user) return;
 
     // Seed categories if table is empty
     const { count: catCount } = await _supabase

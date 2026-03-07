@@ -23,7 +23,7 @@ document.getElementById('themeToggle')?.addEventListener('click', () => {
   updateThemeIcons(next);
 });
 
-/* ---------- Toast ---------- */
+/* ---------- Utils ---------- */
 function showToast(msg, type = '') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -31,25 +31,107 @@ function showToast(msg, type = '') {
   setTimeout(() => t.classList.remove('show'), 2800);
 }
 
+function escapeHtml(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeHtml(html = '') {
+  if (window.DOMPurify) {
+    return window.DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p', 'h2', 'h3', 'strong', 'em', 'u', 's', 'blockquote', 'ul', 'ol', 'li', 'a', 'br', 'img'],
+      ALLOWED_ATTR: ['href', 'src', 'alt', 'target', 'rel'],
+      FORBID_ATTR: ['onerror', 'onload', 'onclick', 'style']
+    });
+  }
+  return html;
+}
+
 /* ---------- State ---------- */
-let editingId      = null;
-let uploadedImages = []; // array of URLs
+let editingId = null;
+let uploadedImages = [];
+let inited = false;
+
+/* ---------- Auth gate ---------- */
+const authGate = document.getElementById('authGate');
+const adminApp = document.getElementById('adminApp');
+const btnLogout = document.getElementById('btnLogout');
+
+function setAuthedUI(authed) {
+  authGate.style.display = authed ? 'none' : '';
+  adminApp.style.display = authed ? '' : 'none';
+  btnLogout.style.display = authed ? '' : 'none';
+}
+
+async function refreshAuth() {
+  const user = await DB.getCurrentUser();
+  const authed = !!user;
+  setAuthedUI(authed);
+  if (authed && !inited) {
+    await initAdmin();
+    inited = true;
+  }
+}
+
+document.getElementById('btnLogin').addEventListener('click', async () => {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) {
+    showToast('请输入邮箱和密码', 'error');
+    return;
+  }
+  try {
+    await DB.signIn(email, password);
+    showToast('登录成功', 'success');
+    await refreshAuth();
+  } catch (e) {
+    console.error('signIn', e);
+    showToast('登录失败，请检查账号密码', 'error');
+  }
+});
+
+document.getElementById('authPassword').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btnLogin').click();
+});
+
+btnLogout.addEventListener('click', async () => {
+  try {
+    await DB.signOut();
+    showToast('已退出登录', 'success');
+    setAuthedUI(false);
+  } catch (e) {
+    console.error('signOut', e);
+    showToast('退出失败', 'error');
+  }
+});
+
+DB.onAuthStateChange(() => {
+  refreshAuth();
+});
 
 /* ---------- Init ---------- */
 (async () => {
+  await refreshAuth();
+})();
+
+async function initAdmin() {
   await DB.seed();
   await renderCategorySelect();
   await renderCatList();
   await renderAdminPostList();
   const editId = new URLSearchParams(location.search).get('edit');
   if (editId) await loadPostForEdit(editId);
-})();
+}
 
 /* ---------- Category select ---------- */
 async function renderCategorySelect() {
-  const sel  = document.getElementById('inputCategory');
+  const sel = document.getElementById('inputCategory');
   const cats = await DB.getCategories();
-  sel.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+  sel.innerHTML = cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
 }
 
 /* ---------- Category list ---------- */
@@ -58,8 +140,8 @@ async function renderCatList() {
   const cats = await DB.getCategories();
   list.innerHTML = cats.map(c => `
     <div class="cat-item">
-      <span>${c}</span>
-      <button class="btn-del" onclick="deleteCategory('${c}')" title="删除">✕</button>
+      <span>${escapeHtml(c)}</span>
+      <button class="btn-del" onclick="deleteCategory(${JSON.stringify(c)})" title="删除">✕</button>
     </div>`).join('');
 }
 
@@ -70,10 +152,11 @@ async function deleteCategory(name) {
   await renderCategorySelect();
   showToast(`已删除分类"${name}"`, 'success');
 }
+window.deleteCategory = deleteCategory;
 
 document.getElementById('btnAddCat').addEventListener('click', async () => {
   const input = document.getElementById('newCatInput');
-  const name  = input.value.trim();
+  const name = input.value.trim();
   if (!name) return;
   await DB.addCategory(name);
   input.value = '';
@@ -87,25 +170,23 @@ document.getElementById('newCatInput').addEventListener('keydown', e => {
 
 /* ---------- Admin post list ---------- */
 async function renderAdminPostList() {
-  const list  = document.getElementById('adminPostList');
+  const list = document.getElementById('adminPostList');
   const posts = await DB.getPosts();
   if (!posts.length) {
     list.innerHTML = '<p style="font-size:.82rem;color:var(--text-3);text-align:center;padding:16px 0">还没有文章</p>';
     return;
   }
   list.innerHTML = posts.slice(0, 20).map(p => `
-    <div class="admin-post-item ${editingId === p.id ? 'active' : ''}" id="adminItem_${p.id}">
-      <div onclick="loadPostForEdit('${p.id}')" style="display:flex;gap:10px;align-items:flex-start;flex:1;min-width:0;cursor:pointer">
-        ${p.coverImage
-          ? `<img class="admin-post-thumb" src="${p.coverImage}" />`
-          : `<div class="admin-post-thumb" style="background:var(--bg-hover);display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:1rem;border-radius:6px">✦</div>`}
+    <div class="admin-post-item ${editingId === p.id ? 'active' : ''}" id="adminItem_${escapeHtml(p.id)}">
+      <div onclick="loadPostForEdit('${escapeHtml(p.id)}')" style="display:flex;gap:10px;align-items:flex-start;flex:1;min-width:0;cursor:pointer">
+        ${p.coverImage ? `<img class="admin-post-thumb" src="${escapeHtml(p.coverImage)}" />` : `<div class="admin-post-thumb" style="background:var(--bg-hover);display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:1rem;border-radius:6px">✦</div>`}
         <div class="admin-post-info">
-          <div class="admin-post-title">${p.title}</div>
-          <div class="admin-post-cat">${p.category}</div>
+          <div class="admin-post-title">${escapeHtml(p.title)}</div>
+          <div class="admin-post-cat">${escapeHtml(p.category)}</div>
         </div>
       </div>
       <div class="admin-post-actions">
-        <button class="btn-del" onclick="deletePost('${p.id}')" title="删除文章">✕</button>
+        <button class="btn-del" onclick="deletePost('${escapeHtml(p.id)}')" title="删除文章">✕</button>
       </div>
     </div>`).join('');
 }
@@ -117,11 +198,12 @@ async function deletePost(id) {
   await renderAdminPostList();
   showToast('文章已删除', 'success');
 }
+window.deletePost = deletePost;
 
 document.getElementById('btnNewPost').addEventListener('click', async () => {
   editingId = null;
   await clearForm();
-  document.getElementById('formTitle').textContent     = '写新文章';
+  document.getElementById('formTitle').textContent = '写新文章';
   document.getElementById('btnSubmitLabel').textContent = '发布文章';
   await renderAdminPostList();
 });
@@ -132,28 +214,27 @@ async function loadPostForEdit(id) {
   if (!p) return;
   editingId = id;
 
-  document.getElementById('formTitle').textContent      = '编辑文章';
-  document.getElementById('btnSubmitLabel').textContent  = '保存更改';
-  document.getElementById('inputTitle').value            = p.title;
-  document.getElementById('inputCoverUrl').value         = p.coverImage || '';
-  document.getElementById('editorArea').innerHTML        = p.content;
-  document.getElementById('inputVideoUrl').value         = p.videoUrl || '';
-  document.getElementById('inputTags').value             = (p.tags || []).join(', ');
-  document.getElementById('inputExcerpt').value          = p.excerpt || '';
+  document.getElementById('formTitle').textContent = '编辑文章';
+  document.getElementById('btnSubmitLabel').textContent = '保存更改';
+  document.getElementById('inputTitle').value = p.title;
+  document.getElementById('inputCoverUrl').value = p.coverImage || '';
+  document.getElementById('editorArea').innerHTML = sanitizeHtml(p.content || '');
+  document.getElementById('inputVideoUrl').value = p.videoUrl || '';
+  document.getElementById('inputTags').value = (p.tags || []).join(', ');
+  document.getElementById('inputExcerpt').value = p.excerpt || '';
   const sel = document.getElementById('inputCategory');
   sel.value = p.category;
 
-  // Featured toggle
   const toggle = document.getElementById('featuredToggle');
   p.featured ? toggle.classList.add('on') : toggle.classList.remove('on');
 
-  // Images
   uploadedImages = p.images ? [...p.images] : [];
   renderPreviews();
 
   await renderAdminPostList();
   document.getElementById('formCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+window.loadPostForEdit = loadPostForEdit;
 
 /* ---------- Featured toggle ---------- */
 document.getElementById('featuredToggle').addEventListener('click', function() {
@@ -178,15 +259,14 @@ document.getElementById('btnInsertLink').addEventListener('mousedown', e => {
   document.getElementById('editorArea').focus();
 });
 
-// Placeholder behavior
 const editorArea = document.getElementById('editorArea');
 editorArea.addEventListener('focus', () => {
   if (editorArea.innerHTML === '') editorArea.innerHTML = '';
 });
 
 /* ---------- Image upload ---------- */
-const uploadArea  = document.getElementById('uploadArea');
-const fileInput   = document.getElementById('fileInput');
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('fileInput');
 const previewGrid = document.getElementById('previewGrid');
 
 uploadArea.addEventListener('click', () => fileInput.click());
@@ -219,7 +299,7 @@ async function handleFiles(files) {
 function renderPreviews() {
   previewGrid.innerHTML = uploadedImages.map((src, i) => `
     <div class="preview-item">
-      <img src="${src}" />
+      <img src="${escapeHtml(src)}" />
       <button class="remove-img" onclick="removeImage(${i})">✕</button>
     </div>`).join('');
 }
@@ -228,16 +308,17 @@ function removeImage(idx) {
   uploadedImages.splice(idx, 1);
   renderPreviews();
 }
+window.removeImage = removeImage;
 
 /* ---------- Submit ---------- */
 document.getElementById('btnSubmit').addEventListener('click', async () => {
-  const title    = document.getElementById('inputTitle').value.trim();
-  const content  = document.getElementById('editorArea').innerHTML.trim();
+  const title = document.getElementById('inputTitle').value.trim();
+  const content = sanitizeHtml(document.getElementById('editorArea').innerHTML.trim());
   const category = document.getElementById('inputCategory').value;
-  const cover    = document.getElementById('inputCoverUrl').value.trim();
-  const video    = document.getElementById('inputVideoUrl').value.trim();
-  const tagsRaw  = document.getElementById('inputTags').value;
-  const excerpt  = document.getElementById('inputExcerpt').value.trim();
+  const cover = document.getElementById('inputCoverUrl').value.trim();
+  const video = document.getElementById('inputVideoUrl').value.trim();
+  const tagsRaw = document.getElementById('inputTags').value;
+  const excerpt = document.getElementById('inputExcerpt').value.trim();
   const featured = document.getElementById('featuredToggle').classList.contains('on');
 
   if (!title) { showToast('请填写标题', 'error'); document.getElementById('inputTitle').focus(); return; }
@@ -257,8 +338,8 @@ document.getElementById('btnSubmit').addEventListener('click', async () => {
   editingId = null;
   await clearForm();
   await renderAdminPostList();
-  document.getElementById('formTitle').textContent      = '写新文章';
-  document.getElementById('btnSubmitLabel').textContent  = '发布文章';
+  document.getElementById('formTitle').textContent = '写新文章';
+  document.getElementById('btnSubmitLabel').textContent = '发布文章';
 });
 
 /* ---------- Clear form ---------- */
@@ -267,12 +348,12 @@ document.getElementById('btnClear').addEventListener('click', async () => {
 });
 
 async function clearForm() {
-  document.getElementById('inputTitle').value     = '';
-  document.getElementById('inputCoverUrl').value  = '';
+  document.getElementById('inputTitle').value = '';
+  document.getElementById('inputCoverUrl').value = '';
   document.getElementById('editorArea').innerHTML = '';
-  document.getElementById('inputVideoUrl').value  = '';
-  document.getElementById('inputTags').value      = '';
-  document.getElementById('inputExcerpt').value   = '';
+  document.getElementById('inputVideoUrl').value = '';
+  document.getElementById('inputTags').value = '';
+  document.getElementById('inputExcerpt').value = '';
   document.getElementById('featuredToggle').classList.remove('on');
   uploadedImages = [];
   renderPreviews();
